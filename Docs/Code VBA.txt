@@ -1,0 +1,1014 @@
+Option Explicit
+
+' =========================================================
+' NAVIGATION ENTRE LES ECRANS
+' =========================================================
+Sub Aller_Vers_Home()
+    UpdateInterface "00_Home"
+End Sub
+
+Sub Aller_Vers_Dashboard()
+    UpdateInterface "Dashboard"
+End Sub
+
+Sub Aller_Simulateur()
+    Sheets("Stress_Test").Select
+End Sub
+
+Sub Aller_Vers_Documentation()
+    UpdateInterface "05_Documentation"
+End Sub
+
+' Fonction pivot pour changer d'écran proprement
+Private Sub UpdateInterface(TargetSheet As String)
+    Application.ScreenUpdating = False
+    Sheets(TargetSheet).Visible = xlSheetVisible
+    Sheets(TargetSheet).Activate
+    
+    ' Cache les éléments Excel sur tous les écrans
+    ActiveWindow.DisplayGridlines = False
+    ActiveWindow.DisplayHeadings = False
+    
+    Application.ScreenUpdating = True
+End Sub
+
+' =========================================================
+' LOGIQUE METIER (BOUTONS CENTRAUX)
+' =========================================================
+
+' Macro pour le bouton "Lancer les Contrôles Qualité"
+Sub ControlerQualite()
+    ' Appelle ta macro de contrôle (on garde le nom que tu as déjà)
+    MsgBox "Lancement de l'audit de qualité des données...", vbInformation, "Risk Audit"
+    ' Ici le code que nous avons écrit précédemment pour l'onglet 03_DQ_Anomalies
+End Sub
+
+' Macro pour le bouton "Générer le Dashboard"
+Sub RafraichirDashboard()
+    Application.ScreenUpdating = False
+    ' 1. Actualise tous les Tableaux Croisés Dynamiques (TCD)
+    ThisWorkbook.RefreshAll
+    MsgBox "Dashboard mis à jour avec les dernières données SAS.", vbInformation, "Mise à jour"
+    Application.ScreenUpdating = True
+End Sub
+
+' Macro pour le bouton "Appliquer Scénario de Crise"
+Sub ExecuterStressTest()
+    ' Redirige vers l'écran de Stress Test
+    Aller_Vers_Stress
+End Sub
+Sub Format_Dashboard_View()
+    Application.ScreenUpdating = False
+    Sheets("Dashboard").Activate
+    
+    ' Masquage des éléments Excel pour l'effet application
+    ActiveWindow.DisplayGridlines = False
+    ActiveWindow.DisplayHeadings = False
+    ActiveWindow.Zoom = 100
+    
+    Application.ScreenUpdating = True
+End Sub
+
+Sub Executer_Stress_Test_Final()
+    Dim wsS As Worksheet: Set wsS = Sheets("Stress_Test")
+    Dim wsD As Worksheet: Set wsD = Sheets("02_Treated_Data")
+    Dim wsM As Worksheet: Set wsM = Sheets("06_Macro_Data")
+    Dim choc As Double, lgdBase As Double, lgdStress As Double
+    Dim coeffSev As Double, seuilAlerte As Double
+    Dim shpBase As Shape, shpStress As Shape, shpGraph As Shape
+    Dim co As ChartObject
+
+    On Error GoTo ErrorHandler
+
+    ' --- 1. PARAMÈTRES (ÉTAPE 1 : GOUVERNANCE) ---
+    ' Lecture du coefficient et du seuil dans l'onglet 06_Macro_Data
+    coeffSev = wsM.Range("B2").Value   ' Ex: 1.5
+    seuilAlerte = wsM.Range("B3").Value ' Ex: 0.35
+
+    ' --- 2. RÉCUPÉRATION DU CHOC (CELLULE G20) ---
+    ' On lit la valeur saisie par l'utilisateur dans G20
+    choc = Abs(wsS.Range("G20").Value)
+
+    ' --- 3. CALCULS MÉTIER ---
+    ' Moyenne actuelle (Base SAS)
+    lgdBase = Application.WorksheetFunction.Average(wsD.Range("M:M"))
+    ' Calcul de la LGD Stressée (Impact immobilier)
+    lgdStress = lgdBase * (1 + (choc * coeffSev))
+
+    ' --- 4. IDENTIFICATION DES FORMES ---
+    Set shpBase = wsS.Shapes("Rectangle 10")    ' Bouton LGD Actuelle
+    Set shpStress = wsS.Shapes("Rectangle 12")   ' Bouton LGD Stressée
+    Set shpGraph = wsS.Shapes("Rectangle 15")    ' Rectangle blanc pour graphique
+
+    ' --- 5. INJECTION DANS LES BOUTONS ---
+    ' Mise à jour du texte et de la couleur
+    shpBase.TextFrame2.TextRange.Characters.Text = Format(lgdBase, "0.0%")
+    shpStress.TextFrame2.TextRange.Characters.Text = Format(lgdStress, "0.0%")
+    
+    If lgdStress > seuilAlerte Then
+        shpStress.Fill.ForeColor.RGB = RGB(192, 0, 0) ' Alerte Rouge
+    Else
+        shpStress.Fill.ForeColor.RGB = RGB(0, 32, 96) ' Bleu Nuit
+    End If
+
+    ' --- 6. GÉNÉRATION DU GRAPHIQUE ---
+    ' Nettoyage avant création
+    For Each co In wsS.ChartObjects: co.Delete: Next co
+    
+    ' Préparation des données pour le graphique (Plage AA1:AB3)
+    wsS.Range("AA1:AB3").Clear
+    wsS.Range("AA1").Value = "Scénario": wsS.Range("AB1").Value = "LGD"
+    wsS.Range("AA2").Value = "Actuelle":   wsS.Range("AB2").Value = lgdBase
+    wsS.Range("AA3").Value = "Stressée":  wsS.Range("AB3").Value = lgdStress
+
+    ' Dessin du graphique exactement dans le rectangle blanc
+    Set co = wsS.ChartObjects.Add(Left:=shpGraph.Left + 15, Top:=shpGraph.Top + 30, _
+                                     Width:=shpGraph.Width - 30, Height:=shpGraph.Height - 60)
+    
+    With co.Chart
+        .SetSourceData Source:=wsS.Range("AA1:AB3")
+        .ChartType = xlColumnClustered
+        .HasTitle = True
+        .ChartTitle.Text = "LGD Actuelle vs LGD Stressée"
+        .HasLegend = False
+        .ChartArea.Format.Fill.Visible = msoFalse
+        .FullSeriesCollection(1).Format.Fill.ForeColor.RGB = RGB(0, 32, 96)
+    End With
+
+    ' --- 7. LOG D'EXÉCUTION (ÉTAPE 1) ---
+    Call WriteLog("Stress Test", "Succès", "G20 Choc: " & Format(choc, "0%"))
+
+    MsgBox "Simulation terminée !", vbInformation
+    Exit Sub
+
+ErrorHandler:
+    Call WriteLog("Stress Test", "ERREUR", Err.Description)
+End Sub
+
+Sub Reset_Stress_Test()
+    Dim wsS As Worksheet: Set wsS = Sheets("Stress_Test")
+    
+    ' 1. Remet le choc à 0%
+    wsS.Range("G20").Value = 0
+    
+    ' 2. Relance la simulation pour rafraîchir les graphiques
+    Call Executer_Stress_Test_Final
+    
+    ' 3. Log de l'action
+    Call WriteLog("Stress Test", "Reset", "Simulateur remis à zéro")
+End Sub
+
+Sub Executer_Simulation_Stress()
+    Dim wsDash As Worksheet: Set wsDash = Sheets("Stress_Test")
+    Dim wsData As Worksheet: Set wsData = Sheets("Scénario_stress_test")
+    Dim choix As String: choix = wsDash.Range("G20").Value
+    
+    Dim lgdBase As Double, lgdStress As Double
+    lgdBase = Application.WorksheetFunction.Average(wsData.Range("D:D"))
+    
+    ' 1. Calcul selon le scénario
+    Select Case choix
+        Case "Baseline": lgdStress = lgdBase
+        Case "Central":  lgdStress = Application.WorksheetFunction.Average(wsData.Range("P:P"))
+        Case "Adverse":  lgdStress = Application.WorksheetFunction.Average(wsData.Range("Q:Q"))
+        Case Else: lgdStress = lgdBase
+    End Select
+    
+    ' 2. Mise à jour des Rectangles de texte
+    wsDash.Shapes("Rectangle 10").TextFrame2.TextRange.Characters.Text = Format(lgdBase, "0.0%")
+    wsDash.Shapes("Rectangle 12").TextFrame2.TextRange.Characters.Text = Format(lgdStress, "0.0%")
+    
+    ' 3. GESTION DE LA COULEUR ROUGE (ALERTE ADVERSE)
+    If choix = "Adverse" Then
+        wsDash.Shapes("Rectangle 12").Fill.ForeColor.RGB = RGB(192, 0, 0) ' Rouge vif
+    Else
+        wsDash.Shapes("Rectangle 12").Fill.ForeColor.RGB = RGB(0, 32, 96) ' Bleu Marine initial
+    End If
+    
+    ' 4. GESTION DU GRAPHIQUE DANS LE RECTANGLE 15
+    Dim chtObj As ChartObject
+    Dim rect15 As Shape: Set rect15 = wsDash.Shapes("Rectangle 15")
+    
+    On Error Resume Next
+    Set chtObj = wsDash.ChartObjects(1)
+    On Error GoTo 0
+    
+    ' Si pas de graphique, on le crée aux dimensions EXACTES du Rectangle 15
+    If chtObj Is Nothing Then
+        Set chtObj = wsDash.ChartObjects.Add(Left:=rect15.Left + 5, _
+            Top:=rect15.Top + 5, Width:=rect15.Width - 10, Height:=rect15.Height - 10)
+    End If
+    
+    ' Mise à jour des données et du style
+    With chtObj.Chart
+        .ChartType = xlColumnClustered
+        ' On vide les anciennes séries pour éviter les doublons
+        Do While .SeriesCollection.Count > 0: .SeriesCollection(1).Delete: Loop
+        
+        With .SeriesCollection.NewSeries
+            .Values = Array(lgdBase, lgdStress)
+            .XValues = Array("Actuelle", "Stressée")
+            ' Couleur des barres pour correspondre au design
+            .Format.Fill.ForeColor.RGB = RGB(0, 112, 192)
+        End With
+        
+        .HasTitle = False
+        .HasLegend = False
+        ' On rend le fond du graphique transparent pour voir le rectangle derrière
+        .ChartArea.Format.Fill.Visible = msoFalse
+        .ChartArea.Format.Line.Visible = msoFalse
+    End With
+End Sub
+Sub Initialiser_Dashboard_Complet()
+    Dim wsDash As Worksheet: Set wsDash = Sheets("Dashboard")
+    Dim wsData As Worksheet: Set wsData = Sheets("Scénario_stress_test")
+    Dim wsTemp As Worksheet
+    Dim pc As PivotCache
+    Dim pt1 As PivotTable, pt2 As PivotTable
+    Dim sc As SlicerCache
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    ' 1. NETTOYAGE RADICAL
+    On Error Resume Next
+    Sheets("TEMP_CALC").Delete ' Supprime l'ancien moteur
+    For Each sc In ActiveWorkbook.SlicerCaches: sc.Delete: Next sc ' Supprime les vieux filtres
+    Dim co As ChartObject
+    For Each co In wsDash.ChartObjects: co.Delete: Next co ' Supprime les vieux graphiques
+    On Error GoTo 0
+
+    ' 2. CRÉATION DU NOUVEAU MOTEUR (BACK-END)
+    Set wsTemp = Sheets.Add: wsTemp.Name = "TEMP_CALC"
+    wsTemp.Visible = xlSheetHidden ' On cache le moteur pour la propreté
+    
+    ' Création du cache à partir de ton Tableau_LGD
+    Set pc = ActiveWorkbook.PivotCaches.Create(SourceType:=xlDatabase, SourceData:="Tableau_LGD")
+
+    ' 3. GÉNÉRATION DES GRAPHIQUES (FRONT-END)
+    ' Graphique 1 : Distribution (Ancré sur Rectangle 4)
+    Set pt1 = pc.CreatePivotTable(TableDestination:=wsTemp.Range("A1"), TableName:="TCD_Dist")
+    With pt1
+        .PivotFields("Tranche_LGD").Orientation = xlRowField
+        .AddDataField .PivotFields("LGD_obs"), "Volume", xlCount
+    End With
+    FormatMyChart wsDash.ChartObjects.Add(Left:=wsDash.Shapes("Rectangle 4").Left + 5, _
+        Top:=wsDash.Shapes("Rectangle 4").Top + 35, Width:=wsDash.Shapes("Rectangle 4").Width - 10, _
+        Height:=wsDash.Shapes("Rectangle 4").Height - 45), pt1, xlColumnClustered
+
+    ' Graphique 2 : Sévérité (Ancré sur Rectangle 5)
+    Set pt2 = pc.CreatePivotTable(TableDestination:=wsTemp.Range("A20"), TableName:="TCD_Sev")
+    With pt2
+        .PivotFields("revenus_client_grp").Orientation = xlRowField
+        .AddDataField .PivotFields("LGD_obs"), "Moyenne", xlAverage
+        .DataFields(1).NumberFormat = "0%"
+    End With
+    FormatMyChart wsDash.ChartObjects.Add(Left:=wsDash.Shapes("Rectangle 5").Left + 5, _
+        Top:=wsDash.Shapes("Rectangle 5").Top + 35, Width:=wsDash.Shapes("Rectangle 5").Width - 10, _
+        Height:=wsDash.Shapes("Rectangle 5").Height - 45), pt2, xlBarClustered
+
+    ' 4. RECONNEXION AUTOMATIQUE DES FILTRES (Rectangle 8)
+    ' On crée le segment Région et on le lie aux DEUX graphiques
+    Set sc = ActiveWorkbook.SlicerCaches.Add2(pt1, "region")
+    sc.Slicers.Add wsDash, , "region", "Sélectionner une Région", _
+        wsDash.Shapes("Rectangle 8").Top + 10, wsDash.Shapes("Rectangle 8").Left + 10, _
+        wsDash.Shapes("Rectangle 8").Width - 20, wsDash.Shapes("Rectangle 8").Height - 20
+    sc.PivotTables.AddPivotTable pt2 ' Liaison cruciale pour le mode "dynamique"
+
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    
+    wsDash.Activate
+    MsgBox "Dashboard entièrement réinitialisé et connecté !", vbInformation
+End Sub
+
+' --- NE PAS OUBLIER LA PROCÉDURE DE FORMATAGE CI-DESSOUS ---
+Sub FormatMyChart(co As ChartObject, pt As PivotTable, typeGraph As Long)
+    With co.Chart
+        .SetSourceData Source:=pt.TableRange1
+        .ChartType = typeGraph
+        .HasTitle = False
+        .HasLegend = False
+        .ShowAllFieldButtons = False
+        .ChartArea.Format.Fill.Visible = msoFalse
+        .ChartArea.Format.Line.Visible = msoFalse
+    End With
+End Sub
+Sub Hard_Reset_Dashboard()
+    Dim wsDash As Worksheet: Set wsDash = Sheets("Dashboard")
+    Dim sc As SlicerCache
+    Dim co As ChartObject
+    
+    ' Demander confirmation pour éviter les erreurs
+    If MsgBox("Voulez-vous supprimer tous les graphiques et filtres du Dashboard ?", _
+       vbQuestion + vbYesNo, "Nettoyage Complet") = vbNo Then Exit Sub
+
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    ' 1. Suppression de l'onglet technique
+    On Error Resume Next
+    Sheets("TEMP_CALC").Delete
+    
+    ' 2. Suppression de tous les segments (Slicers)
+    For Each sc In ActiveWorkbook.SlicerCaches
+        sc.Delete
+    Next sc
+    
+    ' 3. Suppression de tous les graphiques
+    For Each co In wsDash.ChartObjects
+        co.Delete
+    Next co
+    On Error GoTo 0
+
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    
+    MsgBox "Le Dashboard a été vidé avec succès.", vbInformation
+End Sub
+Sub Reset_Simulation_Stress()
+    Dim wsStress As Worksheet: Set wsStress = Sheets("Stress_Test")
+    Dim co As ChartObject
+    
+    Application.ScreenUpdating = False
+    
+    ' 1. Remettre le sélecteur sur Baseline
+    On Error Resume Next
+    wsStress.Range("G20").Value = "Baseline"
+    
+    ' 2. Vider le texte des rectangles de résultats
+    wsStress.Shapes("Rectangle 10").TextFrame2.TextRange.Characters.Text = "-"
+    wsStress.Shapes("Rectangle 12").TextFrame2.TextRange.Characters.Text = "-"
+    
+    ' 3. Remettre la couleur du rectangle de stress en Bleu (neutre)
+    wsStress.Shapes("Rectangle 12").Fill.ForeColor.RGB = RGB(0, 32, 96)
+    
+    ' 4. Supprimer le graphique de simulation
+    For Each co In wsStress.ChartObjects
+        co.Delete
+    Next co
+    On Error GoTo 0
+    
+    Application.ScreenUpdating = True
+    MsgBox "Interface de simulation réinitialisée.", vbInformation
+End Sub
+Sub Exporter_Dashboard_PDF_Final_Premium()
+    Dim ws As Worksheet: Set ws = Sheets("Dashboard")
+    Dim obj As Object
+    Dim maxRow As Long, maxCol As Long
+    Dim lastRight As Double, lastBottom As Double
+    Dim nomFichier As String
+    Dim chemin As String: chemin = ThisWorkbook.Path & "\"
+
+    Application.ScreenUpdating = False
+
+    ' 1. CALCUL AUTOMATIQUE DE LA ZONE OCCUPÉE (Auto-Zone)
+    lastRight = 0
+    lastBottom = 0
+    
+    ' On scanne tous les objets (graphiques, rectangles, segments)
+    For Each obj In ws.Shapes
+        If obj.Visible = msoTrue Then
+            ' On repère le point le plus à droite et le plus bas
+            If (obj.Left + obj.Width) > lastRight Then lastRight = obj.Left + obj.Width
+            If (obj.Top + obj.Height) > lastBottom Then lastBottom = obj.Top + obj.Height
+        End If
+    Next obj
+
+    ' Conversion des points en coordonnées de cellules pour définir la zone d'impression
+    ' On ajoute +1 pour ne pas coller aux bords
+    maxCol = ws.Range("A1").Column + (lastRight / ws.Columns(1).Width)
+    maxRow = ws.Range("A1").Row + (lastBottom / ws.Rows(1).Height)
+
+    ' 2. CONFIGURATION DE LA MISE EN PAGE (Ajustement forcé)
+    On Error Resume Next
+    With ws.PageSetup
+        ' On définit la zone d'impression calculée dynamiquement
+        .PrintArea = ws.Range(ws.Cells(1, 1), ws.Cells(maxRow + 1, maxCol + 1)).Address
+        
+        .Orientation = xlLandscape ' Paysage pour les Dashboards
+        .PaperSize = xlPaperA4
+        
+        ' Paramètres critiques pour l'ajustement sur une seule page
+        .Zoom = False
+        .FitToPagesWide = 1 ' Toute la largeur sur 1 page
+        .FitToPagesTall = 1 ' Toute la hauteur sur 1 page
+        
+        ' Centrage et réduction des marges au minimum
+        .CenterHorizontally = True
+        .CenterVertically = True
+        .LeftMargin = Application.CentimetersToPoints(0.5)
+        .RightMargin = Application.CentimetersToPoints(0.5)
+        .TopMargin = Application.CentimetersToPoints(0.5)
+        .BottomMargin = Application.CentimetersToPoints(0.5)
+        .HeaderMargin = 0
+        .FooterMargin = 0
+    End With
+    On Error GoTo 0
+
+    ' 3. EXPORTATION EN PDF
+    nomFichier = "Rapport_LGD_Final_" & Format(Now, "dd-mm_HHmm") & ".pdf"
+    
+    On Error Resume Next
+    ws.ExportAsFixedFormat Type:=xlTypePDF, _
+        Filename:=chemin & nomFichier, _
+        Quality:=xlQualityStandard, _
+        IncludeDocProperties:=True, _
+        IgnorePrintAreas:=False, _
+        OpenAfterPublish:=True ' Ouvre le PDF pour vérification immédiate
+    
+    If Err.Number <> 0 Then
+        MsgBox "Erreur : Vérifiez que le PDF n'est pas déjà ouvert ou qu'une imprimante est installée.", vbCritical
+    End If
+    On Error GoTo 0
+
+    Application.ScreenUpdating = True
+End Sub
+Sub Exporter_StressTest_PDF()
+    Dim ws As Worksheet: Set ws = Sheets("Stress_Test")
+    Dim obj As Object
+    Dim maxRow As Long, maxCol As Long
+    Dim lastRight As Double, lastBottom As Double
+    Dim nomFichier As String
+    Dim chemin As String: chemin = ThisWorkbook.Path & "\"
+    Dim scenario As String: scenario = ws.Range("G20").Value
+
+    Application.ScreenUpdating = False
+
+    ' 1. CALCUL AUTOMATIQUE DE LA ZONE (Pour englober graphiques et rectangles)
+    lastRight = 0
+    lastBottom = 0
+    
+    For Each obj In ws.Shapes
+        If obj.Visible = msoTrue Then
+            If (obj.Left + obj.Width) > lastRight Then lastRight = obj.Left + obj.Width
+            If (obj.Top + obj.Height) > lastBottom Then lastBottom = obj.Top + obj.Height
+        End If
+    Next obj
+
+    ' Conversion en coordonnées de cellules
+    maxCol = ws.Range("A1").Column + (lastRight / ws.Columns(1).Width)
+    maxRow = ws.Range("A1").Row + (lastBottom / ws.Rows(1).Height)
+
+    ' 2. CONFIGURATION DE LA MISE EN PAGE
+    On Error Resume Next
+    With ws.PageSetup
+        .PrintArea = ws.Range(ws.Cells(1, 1), ws.Cells(maxRow + 1, maxCol + 1)).Address
+        .Orientation = xlLandscape
+        .PaperSize = xlPaperA4
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = 1
+        .CenterHorizontally = True
+        .CenterVertically = True
+        ' Marges réduites pour une meilleure visibilité du graphique
+        .LeftMargin = Application.CentimetersToPoints(0.5)
+        .RightMargin = Application.CentimetersToPoints(0.5)
+        .TopMargin = Application.CentimetersToPoints(0.5)
+        .BottomMargin = Application.CentimetersToPoints(0.5)
+    End With
+    On Error GoTo 0
+
+    ' 3. EXPORTATION (Nom incluant le scénario choisi pour plus de clarté)
+    nomFichier = "Simulation_Stress_" & scenario & "_" & Format(Now, "HHmm") & ".pdf"
+    
+    On Error Resume Next
+    ws.ExportAsFixedFormat Type:=xlTypePDF, _
+        Filename:=chemin & nomFichier, _
+        Quality:=xlQualityStandard, _
+        OpenAfterPublish:=True
+    
+    If Err.Number <> 0 Then
+        MsgBox "Erreur : Assurez-vous que le fichier PDF n'est pas déjà ouvert.", vbCritical
+    End If
+    On Error GoTo 0
+
+    Application.ScreenUpdating = True
+End Sub
+Sub Lancer_Controle_Qualite_Final()
+    Dim wsClean As Worksheet: Set wsClean = Sheets("02_Treated_Data")
+    Dim wsAnom As Worksheet: Set wsAnom = Sheets("03_DQ_Anomalies")
+    Dim Data() As Variant, Results() As Variant
+    Dim lastRow As Long, lastCol As Long, i As Long, j As Long
+    Dim countAnom As Long: countAnom = 0
+    Dim colName As String, cellVal As Variant
+    Dim meanVal As Double, stdDevVal As Double
+    
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+
+    ' Chargement des données traitées (11 774 lignes détectées)
+    lastRow = wsClean.Cells(wsClean.Rows.Count, 1).End(xlUp).Row
+    lastCol = wsClean.Cells(1, wsClean.Columns.Count).End(xlToLeft).Column
+    Data = wsClean.Range(wsClean.Cells(1, 1), wsClean.Cells(lastRow, lastCol)).Value
+    
+    ReDim Results(1 To (lastRow * lastCol) / 10 + 1, 1 To 5)
+    
+    For j = 1 To lastCol
+        colName = Data(1, j)
+        
+        ' Calcul des seuils statistiques
+        On Error Resume Next
+        meanVal = Application.WorksheetFunction.Average(wsClean.Columns(j))
+        stdDevVal = Application.WorksheetFunction.StDev_S(wsClean.Columns(j))
+        On Error GoTo 0
+
+        For i = 2 To lastRow
+            cellVal = Data(i, j)
+            Dim isError As Boolean: isError = False
+            Dim errType As String, errSev As String
+            
+            ' Détection des valeurs manquantes
+            If IsEmpty(cellVal) Or cellVal = "" Then
+                isError = True: errType = "VIDE": errSev = "Majeur"
+            
+            ' Détection des valeurs aberrantes (Z-Score > 3)
+            ElseIf IsNumeric(cellVal) And stdDevVal > 0 Then
+                If Abs(cellVal - meanVal) > (3 * stdDevVal) Then
+                    isError = True: errType = "ABERRANT": errSev = "Moyen"
+                End If
+            End If
+            
+            If isError Then
+                countAnom = countAnom + 1
+                If countAnom > UBound(Results) Then ReDim Preserve Results(1 To UBound(Results) + 1000, 1 To 5)
+                Results(countAnom, 1) = Data(i, 1) ' ID Client
+                Results(countAnom, 2) = colName
+                Results(countAnom, 3) = errType
+                Results(countAnom, 4) = errSev
+                Results(countAnom, 5) = cellVal
+            End If
+        Next i
+    Next j
+    
+    ' Écriture dans l'onglet 03_DQ_Anomalies
+    wsAnom.Cells.Clear
+    wsAnom.Range("A1:E1").Value = Array("ID_Client", "Variable", "Type_Erreur", "Sévérité", "Valeur_Détectée")
+    If countAnom > 0 Then wsAnom.Range("A2").Resize(countAnom, 5).Value = Results
+    wsAnom.Columns("A:E").AutoFit
+    
+    Application.Calculation = xlCalculationAutomatic
+    Application.ScreenUpdating = True
+    MsgBox "Contrôle terminé : " & countAnom & " anomalies détectées."
+End Sub
+Sub Generer_Rapport_DQ_Final_Cible()
+    Dim wsDQ As Worksheet: Set wsDQ = Sheets("Data_Quality")
+    Dim wsClean As Worksheet: Set wsClean = Sheets("02_treated_data")
+    Dim i As Long, targetRow As Long, lastCol As Long, lastRowData As Long
+    Dim colName As String, varQuali As Variant
+    Dim listeQuali As Variant
+    
+    ' --- CONFIGURATION ---
+    ' Ta liste spécifique de variables qualitatives
+    listeQuali = Array("revenus_client_grp", "etat_bien_grp", "projet_immo_grp", "type_contrat_grp", "usage_bien_grp", "region")
+    
+    Application.ScreenUpdating = False
+    wsDQ.Cells.Clear
+    
+    lastRowData = wsClean.Cells(wsClean.Rows.Count, 1).End(xlUp).Row
+    lastCol = wsClean.Cells(1, wsClean.Columns.Count).End(xlToLeft).Column
+    
+    ' =========================================================
+    ' SECTION 1 : STATISTIQUES DESCRIPTIVES (QUANTITATIVES)
+    ' =========================================================
+    wsDQ.Range("B2").Value = "SECTION 1 : ANALYSE DES VARIABLES QUANTITATIVES"
+    wsDQ.Range("B2").Font.Size = 14: wsDQ.Range("B2").Font.Bold = True
+    
+    wsDQ.Range("B4:I4").Value = Array("Variable", "Moyenne", "Médiane", "Minimum", "Maximum", "Écart-type", "Skewness", "Kurtosis")
+    wsDQ.Range("B4:I4").Font.Bold = True
+    wsDQ.Range("B4:I4").Interior.Color = RGB(230, 230, 230)
+    
+    targetRow = 5
+    For i = 1 To lastCol
+        colName = LCase(wsClean.Cells(1, i).Value)
+        ' On filtre pour ne prendre que les vrais chiffres (ex: LGD, LTV, Montant)
+        If Application.WorksheetFunction.Count(wsClean.Columns(i)) > (lastRowData * 0.8) And _
+           colName <> "annee_defaut" And colName <> "mois_defaut" And colName <> "date_defaut_sas" Then
+            
+            With wsDQ
+                .Cells(targetRow, 2).Value = wsClean.Cells(1, i).Value
+                .Cells(targetRow, 3).Value = Application.WorksheetFunction.Average(wsClean.Columns(i))
+                .Cells(targetRow, 4).Value = Application.WorksheetFunction.Median(wsClean.Columns(i))
+                .Cells(targetRow, 5).Value = Application.WorksheetFunction.Min(wsClean.Columns(i))
+                .Cells(targetRow, 6).Value = Application.WorksheetFunction.Max(wsClean.Columns(i))
+                .Cells(targetRow, 7).Value = Application.WorksheetFunction.StDev_S(wsClean.Columns(i))
+                On Error Resume Next
+                .Cells(targetRow, 8).Value = Application.WorksheetFunction.Skew(wsClean.Columns(i))
+                .Cells(targetRow, 9).Value = Application.WorksheetFunction.Kurt(wsClean.Columns(i))
+                On Error GoTo 0
+                targetRow = targetRow + 1
+            End With
+        End If
+    Next i
+    
+    ' =========================================================
+    ' SECTION 2 : MATRICE DE COMPLÉTUDE (HEATMAP)
+    ' =========================================================
+    targetRow = targetRow + 3
+    wsDQ.Cells(targetRow, 2).Value = "SECTION 2 : MATRICE DE COMPLÉTUDE (TAUX DE REMPLISSAGE)"
+    wsDQ.Cells(targetRow, 2).Font.Bold = True: targetRow = targetRow + 2
+    
+    wsDQ.Cells(targetRow, 2).Value = "Variable"
+    wsDQ.Cells(targetRow, 3).Value = "Taux de Complétude"
+    wsDQ.Range(wsDQ.Cells(targetRow, 2), wsDQ.Cells(targetRow, 3)).Font.Bold = True
+    
+    For i = 1 To lastCol
+        targetRow = targetRow + 1
+        Dim nbRemplis As Long: nbRemplis = Application.WorksheetFunction.CountA(wsClean.Columns(i)) - 1
+        Dim taux As Double: taux = nbRemplis / (lastRowData - 1)
+        wsDQ.Cells(targetRow, 2).Value = wsClean.Cells(1, i).Value
+        wsDQ.Cells(targetRow, 3).Value = taux
+        wsDQ.Cells(targetRow, 3).NumberFormat = "0.0%"
+        If taux < 1 Then wsDQ.Cells(targetRow, 3).Interior.Color = RGB(255, 204, 204) Else wsDQ.Cells(targetRow, 3).Interior.Color = RGB(204, 255, 204)
+    Next i
+    
+    ' =========================================================
+    ' SECTION 3 : ANALYSE DES VARIABLES QUALITATIVES (CIBLÉES)
+    ' =========================================================
+    targetRow = targetRow + 3
+    wsDQ.Cells(targetRow, 2).Value = "SECTION 3 : RÉPARTITION DES VARIABLES QUALITATIVES"
+    wsDQ.Cells(targetRow, 2).Font.Size = 14: wsDQ.Cells(targetRow, 2).Font.Bold = True
+    targetRow = targetRow + 2
+    
+    wsDQ.Range(wsDQ.Cells(targetRow, 2), wsDQ.Cells(targetRow, 5)).Value = Array("Variable", "Nb Catégories", "Mode (Majoritaire)", "Poids du Mode (%)")
+    wsDQ.Range(wsDQ.Cells(targetRow, 2), wsDQ.Cells(targetRow, 5)).Font.Bold = True
+    wsDQ.Range(wsDQ.Cells(targetRow, 2), wsDQ.Cells(targetRow, 5)).Interior.Color = RGB(230, 230, 230)
+    
+    targetRow = targetRow + 1
+    For Each varQuali In listeQuali
+        ' Trouver le numéro de colonne de la variable
+        Dim colIdx As Long: colIdx = 0
+        On Error Resume Next
+        colIdx = Application.WorksheetFunction.Match(varQuali, wsClean.Rows(1), 0)
+        On Error GoTo 0
+        
+        If colIdx > 0 Then
+            Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+            Dim cell As Range, val As Variant
+            Dim dataRange As Range: Set dataRange = wsClean.Range(wsClean.Cells(2, colIdx), wsClean.Cells(lastRowData, colIdx))
+            
+            ' Comptage des fréquences
+            For Each cell In dataRange
+                val = cell.Value
+                If val <> "" Then dict(val) = dict(val) + 1
+            Next cell
+            
+            ' Trouver le Mode
+            Dim maxFreq As Long: maxFreq = 0: Dim modeVal As String: Dim key As Variant
+            For Each key In dict.Keys
+                If dict(key) > maxFreq Then maxFreq = dict(key): modeVal = CStr(key)
+            Next key
+            
+            ' Ecriture des résultats
+            wsDQ.Cells(targetRow, 2).Value = varQuali
+            wsDQ.Cells(targetRow, 3).Value = dict.Count
+            wsDQ.Cells(targetRow, 4).Value = modeVal
+            wsDQ.Cells(targetRow, 5).Value = maxFreq / (lastRowData - 1)
+            wsDQ.Cells(targetRow, 5).NumberFormat = "0.0%"
+            
+            targetRow = targetRow + 1
+            Set dict = Nothing
+        End If
+    Next varQuali
+    
+    wsDQ.Columns("B:I").AutoFit
+    Application.ScreenUpdating = True
+    MsgBox "Analyse Data Quality complète générée !", vbInformation
+End Sub
+Sub Reset_DataQuality_Interface()
+    Dim wsDQ As Worksheet: Set wsDQ = Sheets("Data_Quality")
+    
+    ' Demander confirmation pour éviter les erreurs de manipulation
+    If MsgBox("Voulez-vous réinitialiser l'onglet de Data Quality ?", _
+              vbQuestion + vbYesNo, "Réinitialisation") = vbNo Then Exit Sub
+              
+    Application.ScreenUpdating = False
+    
+    ' 1. Effacement de tout le contenu des cellules (valeurs et formats)
+    ' On ne supprime pas les colonnes pour garder la largeur, on vide juste le contenu
+    wsDQ.Cells.ClearContents
+    wsDQ.Cells.Interior.Color = xlNone
+    wsDQ.Cells.Borders.LineStyle = xlNone
+    wsDQ.Cells.Font.Bold = False
+    
+    ' 2. Réinitialisation de l'en-tête principal (optionnel)
+    wsDQ.Range("B2").Value = "EN ATTENTE D'ANALYSE..."
+    wsDQ.Range("B2").Font.Size = 14
+    wsDQ.Range("B2").Font.Italic = True
+    
+    ' 3. Recentrer la vue en haut à gauche
+    Application.Goto wsDQ.Range("A1"), Scroll:=True
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "L'onglet Data Quality a été vidé.", vbInformation
+End Sub
+Sub Reset_Table_Anomalies()
+    Dim wsAnom As Worksheet: Set wsAnom = Sheets("03_DQ_anomalies")
+    
+    Application.ScreenUpdating = False
+    
+    ' 1. Nettoyage complet (Contenu, Formats, Couleurs)
+    wsAnom.Cells.Clear
+    
+    ' 2. Réécriture propre des en-têtes (Optionnel mais recommandé pour la structure)
+    With wsAnom.Range("A1:E1")
+        .Value = Array("ID_Dossier", "Variable", "Type_Erreur", "Sévérité", "Valeur_Détectée")
+        .Font.Bold = True
+        .Interior.Color = RGB(220, 220, 220) ' Gris clair pour la structure
+    End With
+    
+    ' 3. Ajustement de la largeur des colonnes
+    wsAnom.Columns("A:E").ColumnWidth = 20
+    
+    ' 4. Recentrer la vue
+    Application.Goto wsAnom.Range("A1"), Scroll:=True
+    
+    Application.ScreenUpdating = True
+End Sub
+Sub Exporter_DataQuality_PDF_Fix()
+    Dim ws As Worksheet: Set ws = Sheets("Data_Quality")
+    Dim obj As Object
+    Dim maxRow As Long, maxCol As Long
+    Dim lastRight As Double, lastBottom As Double
+    Dim nomFichier As String
+    Dim chemin As String: chemin = ThisWorkbook.Path & "\"
+
+    Application.ScreenUpdating = False
+
+    ' 1. CALCUL DYNAMIQUE DE LA ZONE (Pour éviter les décalages)
+    lastRight = 0
+    lastBottom = 0
+
+    ' Détection basée sur les cellules remplies (vos 3 sections)
+    On Error Resume Next
+    maxRow = ws.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlPrevious).Row
+    maxCol = ws.Cells.Find("*", SearchOrder:=xlByColumns, SearchDirection:=xlPrevious).Column
+    
+    ' Ajustement si vous avez des boutons ou formes plus bas/plus à droite
+    For Each obj In ws.Shapes
+        If obj.Visible = msoTrue Then
+            If (obj.Left + obj.Width) > lastRight Then lastRight = obj.Left + obj.Width
+            If (obj.Top + obj.Height) > lastBottom Then lastBottom = obj.Top + obj.Height
+        End If
+    Next obj
+
+    ' On prend le maximum entre les cellules et les objets
+    Dim maxColObj As Long: maxColObj = ws.Range("A1").Column + (lastRight / ws.Columns(1).Width)
+    Dim maxRowObj As Long: maxRowObj = ws.Range("A1").Row + (lastBottom / ws.Rows(1).Height)
+    
+    If maxColObj > maxCol Then maxCol = maxColObj
+    If maxRowObj > maxRow Then maxRow = maxRowObj
+    On Error GoTo 0
+
+    ' 2. CONFIGURATION DE LA MISE EN PAGE (Inspiré du Stress Test)
+    On Error Resume Next
+    With ws.PageSetup
+        ' On définit la zone d'impression totale
+        .PrintArea = ws.Range(ws.Cells(1, 1), ws.Cells(maxRow + 1, maxCol + 1)).Address
+        .Orientation = xlLandscape ' Paysage indispensable pour vos 8 colonnes de stats
+        .PaperSize = xlPaperA4
+        .Zoom = False
+        
+        ' FORCE l'ajustement sur une seule page en largeur pour éviter les coupures
+        .FitToPagesWide = 1
+        .FitToPagesTall = 1 ' Mettre à 1 pour tout avoir sur une page, ou False si la liste est trop longue
+        
+        .CenterHorizontally = True
+        .CenterVertically = False ' False pour garder le titre en haut de page
+        
+        ' Marges minimales
+        .LeftMargin = Application.CentimetersToPoints(0.5)
+        .RightMargin = Application.CentimetersToPoints(0.5)
+        .TopMargin = Application.CentimetersToPoints(0.5)
+        .BottomMargin = Application.CentimetersToPoints(0.5)
+    End With
+    On Error GoTo 0
+
+    ' 3. EXPORTATION
+    nomFichier = "Rapport_Qualite_Final_" & Format(Now, "ddmmyy_HHmm") & ".pdf"
+    
+    On Error Resume Next
+    ws.ExportAsFixedFormat Type:=xlTypePDF, _
+        Filename:=chemin & nomFichier, _
+        Quality:=xlQualityStandard, _
+        OpenAfterPublish:=True
+    
+    If Err.Number <> 0 Then
+        MsgBox "Erreur : Vérifiez que le fichier PDF n'est pas déjà ouvert.", vbCritical
+    End If
+    On Error GoTo 0
+
+    Application.ScreenUpdating = True
+End Sub
+Sub Afficher_Methodologie(Titre As String)
+    Dim texteAafficher As String
+    Dim ws As Worksheet: Set ws = Sheets("Méthodologie_docs")
+    Dim maForme As Shape
+    
+    ' 1. Sécurité : Vérifier si la forme existe
+    On Error Resume Next
+    Set maForme = ws.Shapes("ZoneTexte_Doc")
+    On Error GoTo 0
+    
+    If maForme Is Nothing Then
+        MsgBox "La forme 'ZoneTexte_Doc' n'a pas été trouvée sur l'onglet.", vbCritical
+        Exit Sub
+    End If
+
+    ' 2. Construction du texte détaillé par blocs (pour éviter l'erreur de continuité)
+    Select Case Titre
+        Case "Bouton1"
+            ' --- PARTIE 1 : INTRODUCTION ---
+            texteAafficher = "1. INTRODUCTION & OBJECTIFS" & vbCrLf & vbCrLf & _
+                "CADRE DE L'ÉTUDE ET ENJEUX PRUDENTIELS :" & vbCrLf & _
+                "Dans le cadre des exigences réglementaires de Bâle III et des normes comptables IFRS 9, " & _
+                "l'estimation de la LGD (Loss Given Default) est devenue un pilier central de la gestion du risque. " & _
+                "Ce paramètre mesure la part de l'EAD (Exposition au moment du défaut) qui ne sera pas recouvrée " & _
+                "par la banque après l'exercice de toutes les garanties." & vbCrLf & vbCrLf
+                
+            texteAafficher = texteAafficher & "Ce projet vise à modéliser la sévérité des pertes sur un portefeuille de " & _
+                "prêts immobiliers. L'enjeu est double : d'une part, assurer une couverture adéquate des fonds propres " & _
+                "face aux pertes inattendues, et d'autre part, affiner la politique de provisionnement statistique." & vbCrLf & vbCrLf & _
+                "OBJECTIFS OPÉRATIONNELS :" & vbCrLf & _
+                "1. Fiabilisation (Data Quality) : Déployer un moteur d'audit capable d'isoler les anomalies " & _
+                "systémiques ou de saisie sur l'échantillon de 11 779 dossiers." & vbCrLf & _
+                "2. Analyse de Distribution : Comprendre la morphologie de la perte (Moyenne, Médiane, Volatilité) " & _
+                "et identifier les risques de queue (Fat Tails) via le Skewness et le Kurtosis." & vbCrLf & _
+                "3. Stress Testing : Simuler la résilience du bilan face à des chocs de marché (Downturn LGD)." & vbCrLf & vbCrLf
+                
+            texteAafficher = texteAafficher & "PÉRIMÈTRE DES DONNÉES :" & vbCrLf & _
+                "L'étude repose sur 11 779 observations détaillant la perte finale (LGD_obs) et des variables " & _
+                "explicatives telles que le ratio LTV (Loan-to-Value), le taux d'apport, les revenus du client, " & _
+                "la localisation géographique (Région) et la nature du projet immobilier."
+
+        Case "Bouton2"
+            ' --- PARTIE 2 : AUDIT ---
+            texteAafficher = "2. AUDIT APPROFONDI DE LA BASE DE DONNÉES" & vbCrLf & vbCrLf & _
+                "L'audit constitue l'étape de certification des données avant modélisation. Notre moteur VBA " & _
+                "exécute trois niveaux de contrôle critique :" & vbCrLf & vbCrLf & _
+                "I. CONTRÔLE D'INTÉGRITÉ ET RÈGLE DES 3 SIGMAS :" & vbCrLf & _
+                "Un algorithme scanne chaque ligne pour détecter les 'Outliers' (valeurs aberrantes). Nous utilisons " & _
+                "la règle statistique des 3 sigmas pour identifier les données s'écartant trop de la moyenne, " & _
+                "garantissant ainsi que les revenus ou montants de prêts ne faussent pas les résultats." & vbCrLf & _
+                "Les erreurs détectées sont listées dynamiquement dans l'onglet '03_DQ_anomalies'." & vbCrLf & vbCrLf
+                
+            texteAafficher = texteAafficher & "II. MATRICE DE COMPLÉTUDE ET HEATMAP :" & vbCrLf & _
+                "La complétude est mesurée pour chaque variable. Une Heatmap visuelle permet de valider que les " & _
+                "variables discriminantes (Revenus, LTV, Type de contrat) présentent un taux de remplissage de 100%. " & _
+                "Cela permet d'éviter les biais d'exclusion lors de l'estimation de la perte moyenne." & vbCrLf & vbCrLf & _
+                "III. ANALYSE DE LA CARDINALITÉ ET DES DISTRIBUTIONS :" & vbCrLf & _
+                "Pour les variables qualitatives, nous vérifions le nombre de catégories (Cardinalité) et le Mode. " & _
+                "Pour la LGD_obs, nous calculons le Skewness (asymétrie) pour vérifier si la distribution est " & _
+                "étirée vers les pertes élevées, ce qui est une caractéristique classique du risque de crédit."
+
+        Case "Bouton3"
+            ' --- PARTIE 3 : KPI ---
+            texteAafficher = "3. ANALYSE DES INDICATEURS CLÉS (KPIs)" & vbCrLf & vbCrLf & _
+                "Cette section détaille les mesures de performance et de risque affichées sur le Dashboard." & vbCrLf & vbCrLf & _
+                "I. MESURES DE TENDANCE CENTRALE :" & vbCrLf & _
+                "La LGD moyenne du portefeuille est confrontée à la médiane. Un écart important entre ces deux " & _
+                "valeurs signale une concentration de dossiers sur des extrêmes de perte. Le volume total des " & _
+                "encours en défaut permet de pondérer l'importance relative de chaque segment de risque." & vbCrLf & vbCrLf
+                
+            texteAafficher = texteAafficher & "II. ANALYSE DE LA DISPERSION ET VOLATILITÉ :" & vbCrLf & _
+                "L'écart-type mesure la stabilité de nos estimations. Une volatilité élevée sur un segment spécifique " & _
+                "(ex: une région donnée ou un type de bien) indique que la LGD est plus difficile à prévoir et " & _
+                "nécessite une marge de prudence accrue." & vbCrLf & vbCrLf & _
+                "III. SEGMENTATION MÉTIER DYNAMIQUE :" & vbCrLf & _
+                "Le Dashboard permet une analyse multidimensionnelle via les Slicers VBA. On peut ainsi isoler " & _
+                "l'impact du 'Type de Contrat' (Actifs stables vs précaires) ou de l'usage du bien (Résidence " & _
+                "Principale vs Investissement) sur le taux de recouvrement effectif."
+
+        Case "Bouton4"
+            ' --- PARTIE 4 : MÉTHODOLOGIE TECHNIQUE DU STRESS TEST ---
+            texteAafficher = "4. MÉTHODOLOGIE DU STRESS TEST (CALIBRATION PAR QUARTILES LTV)" & vbCrLf & vbCrLf & _
+                "La méthodologie de stress test repose sur un étalonnage précis liant la LGD actuelle à la structure " & _
+                "de garantie du prêt (LTV_octroi). On ne se contente pas d'un choc uniforme, mais d'une " & _
+                "re-calibration par quartile pour atteindre des cibles de perte réglementaire (Downturn)." & vbCrLf & vbCrLf
+                
+            texteAafficher = texteAafficher & "I. ÉTAPES DE CALCUL DES COEFFICIENTS (SCÉNARIO_STRESS_TEST) :" & vbCrLf & _
+                "1. Segmentation LTV : Les 11 779 dossiers sont répartis en 4 quartiles selon leur LTV_octroi." & vbCrLf & _
+                "2. Moyenne de Référence : On calcule la LGD actuelle moyenne pour chaque quartile." & vbCrLf & _
+                "3. Calcul du Coefficient K : Pour chaque quartile, on définit un coefficient K tel que :" & vbCrLf & _
+                "   K = (Cible Scénario 12% ou 20%) / (Moyenne LGD actuelle du Quartile)." & vbCrLf & vbCrLf
+                
+            texteAafficher = texteAafficher & "II. APPLICATION INDIVIDUELLE ET PONDÉRATION :" & vbCrLf & _
+                "Pour chaque prêt, la LGD stressée est calculée en pondérant sa valeur initiale par le coefficient K " & _
+                "propre à son quartile de LTV :" & vbCrLf & _
+                " - Formule : LGD_stressée = LGD_actuelle * Coefficient_K_Quartile." & vbCrLf & _
+                " - Plafonnement (Cap) : Chaque valeur est bridée à 100% (Min(1 ; LGD_st)) pour rester réaliste." & vbCrLf & vbCrLf
+                
+            texteAafficher = texteAafficher & "III. SYNTHÈSE DES SCÉNARIOS ET AUDITABILITÉ :" & vbCrLf & _
+                "• Scénario Central : Pivot calibré sur une perte moyenne de 12%." & vbCrLf & _
+                "• Scénario Adverse : Pivot calibré sur une perte moyenne de 20%." & vbCrLf & _
+                "L'intégralité de cette mécanique (tableau des moyennes par quartile de LTV et calculs de pondération) " & _
+                "est détaillée et auditable dans l'onglet : 'Scénario_stress_test'."
+
+        Case "Reset"
+            texteAafficher = ""
+    End Select
+
+    ' 3. Mise à jour du texte et application de la mise en forme (Segoe UI 18)
+    With maForme.TextFrame2.TextRange
+        .Text = texteAafficher
+        .Font.Name = "Segoe UI"
+        .Font.Size = 18
+        .Font.Fill.ForeColor.RGB = RGB(0, 0, 0) ' Texte Noir
+    End With
+End Sub
+
+' --- MACROS À AFFECTER AUX BOUTONS ---
+Sub Clic_Bouton_1(): Afficher_Methodologie "Bouton1": End Sub
+Sub Clic_Bouton_2(): Afficher_Methodologie "Bouton2": End Sub
+Sub Clic_Bouton_3(): Afficher_Methodologie "Bouton3": End Sub
+Sub Clic_Bouton_4(): Afficher_Methodologie "Bouton4": End Sub
+Sub Clic_Reset():    Afficher_Methodologie "Reset":   End Sub
+
+Sub AllerVersMethodologie()
+    ' 1. Activer l'onglet cible
+    On Error Resume Next
+    Sheets("Méthodologie_docs").Activate
+    If Err.Number <> 0 Then
+        MsgBox "L'onglet 'Méthodologie_docs' est introuvable !", vbCritical
+        Exit Sub
+    End If
+    On Error GoTo 0
+    
+    ' 2. Positionner la vue en haut à gauche
+    ActiveWindow.ScrollRow = 1
+    ActiveWindow.ScrollColumn = 1
+    Range("A1").Select
+    
+    ' 3. Optionnel : Réinitialiser la zone de texte à l'arrivée
+    ' Cela permet d'avoir une page propre avant de cliquer sur les boutons 1, 2, 3 ou 4
+    Afficher_Methodologie "Reset"
+End Sub
+Sub Exporter_Methodologie_PDF()
+    Dim ws As Worksheet: Set ws = Sheets("Méthodologie_docs")
+    Dim obj As Object
+    Dim maxRow As Long, maxCol As Long
+    Dim lastRight As Double, lastBottom As Double
+    Dim nomFichier As String
+    Dim chemin As String: chemin = ThisWorkbook.Path & "\"
+
+    Application.ScreenUpdating = False
+
+    ' 1. CALCUL DE LA ZONE D'IMPRESSION (Englobe les textes longs et les boutons)
+    lastRight = 0
+    lastBottom = 0
+    
+    ' On scanne toutes les formes (rectangles de texte, boutons de navigation)
+    For Each obj In ws.Shapes
+        If obj.Visible = msoTrue Then
+            If (obj.Left + obj.Width) > lastRight Then lastRight = obj.Left + obj.Width
+            If (obj.Top + obj.Height) > lastBottom Then lastBottom = obj.Top + obj.Height
+        End If
+    Next obj
+
+    ' On vérifie aussi les cellules au cas où du texte serait écrit hors formes
+    On Error Resume Next
+    Dim lastCellRow As Long: lastCellRow = ws.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlPrevious).Row
+    Dim lastCellCol As Long: lastCellCol = ws.Cells.Find("*", SearchOrder:=xlByColumns, SearchDirection:=xlPrevious).Column
+    On Error GoTo 0
+
+    ' Conversion des coordonnées des formes en cellules pour la PrintArea
+    maxCol = ws.Range("A1").Column + (lastRight / ws.Columns(1).Width)
+    maxRow = ws.Range("A1").Row + (lastBottom / ws.Rows(1).Height)
+    
+    ' On prend le maximum entre les formes et les cellules
+    If lastCellRow > maxRow Then maxRow = lastCellRow
+    If lastCellCol > maxCol Then maxCol = lastCellCol
+
+    ' 2. CONFIGURATION DE LA MISE EN PAGE
+    With ws.PageSetup
+        .PrintArea = ws.Range(ws.Cells(1, 1), ws.Cells(maxRow + 1, maxCol + 1)).Address
+        .Orientation = xlPortrait ' Portrait est souvent mieux pour de la documentation textuelle
+        .PaperSize = xlPaperA4
+        .Zoom = False
+        .FitToPagesWide = 1 ' On force le texte à tenir sur la largeur de la page A4
+        .FitToPagesTall = False ' On laisse couler sur plusieurs pages si le texte est très long
+        .CenterHorizontally = True
+        .TopMargin = Application.CentimetersToPoints(1)
+        .BottomMargin = Application.CentimetersToPoints(1)
+    End With
+
+    ' 3. EXPORTATION
+    nomFichier = "Documentation_Methodologique_LGD_" & Format(Now, "ddmmyy_HHmm") & ".pdf"
+    
+    On Error Resume Next
+    ws.ExportAsFixedFormat Type:=xlTypePDF, _
+        Filename:=chemin & nomFichier, _
+        Quality:=xlQualityStandard, _
+        IncludeDocProperties:=True, _
+        OpenAfterPublish:=True
+    
+    If Err.Number <> 0 Then
+        MsgBox "Erreur : Impossible de générer le PDF. Vérifiez si un fichier portant le même nom est déjà ouvert.", vbCritical
+    Else
+        MsgBox "La documentation méthodologique a été exportée avec succès dans le dossier du projet.", vbInformation
+    End If
+    On Error GoTo 0
+
+    Application.ScreenUpdating = True
+End Sub
