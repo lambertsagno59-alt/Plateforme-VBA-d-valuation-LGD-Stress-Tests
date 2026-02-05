@@ -16,13 +16,21 @@ L'outil permet de centraliser l'audit de la qualité des données, l'analyse de 
 * **Expertise Métier :** Risque de Crédit, Paramètres Bâlois, Modélisation de Sévérité, IFRS 9.
 * **Analyse de Données :** Statistiques descriptives (Moyenne, Écart-type, Kurtosis, Skewness) appliquées aux variables financières.
 
-## 📊 Aperçu de l'Interface
-| Dashboard de Contrôle | Documentation Méthodologique |
-| :---: | :---: |
-| ![Dashboard](Screenshots/page1.jpg) | ![Méthodo](Screenshots/page2.jpg) |
+## 📊 Aperçu de la Plateforme
 
-*(Les captures d'écran illustrent l'interface "LGD RISK ANALYTICS SUITE" et la structure du rapport généré).*
+Pour illustrer le fonctionnement de l'outil, voici les trois piliers de l'application :
 
+### 1. Dashboard Analytique (Pilotage)
+Interface principale permettant de suivre la santé des données (87% de complétude) et les indicateurs clés du portefeuille de 11 779 lignes.
+![Dashboard Analytique](Screenshots/page2.jpg)
+
+### 2. Simulateur de Stress Test (Gestion des Risques)
+Module dédié à l'application de scénarios macroéconomiques pour évaluer la résilience de la LGD face aux chocs de marché.
+![Simulation Stress Test](Screenshots/page3.jpg)
+
+### 3. Moteur VBA (Architecture Technique)
+Aperçu de la logique de programmation backend permettant l'automatisation des contrôles qualité et la génération des rapports PDF.
+![Code VBA](Screenshots/page1.jpg)
 ## 📁 Structure du Dépôt
 * `/Outil` : `Plateforme_LGD_Stress_Testing.xlsm` (L'application principale).
 * `/Docs` : Documentation détaillée sur la méthodologie et les objectifs opérationnels.
